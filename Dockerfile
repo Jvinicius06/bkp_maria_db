@@ -4,7 +4,7 @@ RUN apk add --no-cache \
     mariadb-client \
     mariadb-connector-c \
     rclone \
-    dcron \
+    busybox-suid \
     pv \
     gzip \
     bash \

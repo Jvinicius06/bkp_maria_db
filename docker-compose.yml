@@ -4,6 +4,7 @@ services:
     image: mariadb-backup:local
     container_name: mariadb-backup
     restart: unless-stopped
+    init: true
     environment:
       TZ: ${TZ:-America/Sao_Paulo}
       DB_HOST: ${DB_HOST}

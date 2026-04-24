@@ -38,5 +38,6 @@ fi
 touch /backups/cron.log /backups/backup.log
 tail -F /backups/cron.log /backups/backup.log &
 
-echo "[entrypoint] iniciando crond em foreground"
-exec crond -f -l 2
+echo "[entrypoint] iniciando crond (busybox) em foreground"
+# Usa o crond do busybox (-f foreground, -l 8 log level, -L arquivo de log)
+exec busybox crond -f -l 8 -L /dev/stderr
