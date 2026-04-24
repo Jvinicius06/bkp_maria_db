@@ -1,0 +1,36 @@
+services:
+  mariadb-backup:
+    build: .
+    image: mariadb-backup:local
+    container_name: mariadb-backup
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-America/Sao_Paulo}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      RCLONE_REMOTE: ${RCLONE_REMOTE}
+      THROTTLE_MBPS: ${THROTTLE_MBPS:-5}
+      GZIP_LEVEL: ${GZIP_LEVEL:-1}
+      LOCAL_RETENTION: ${LOCAL_RETENTION:-3}
+      REMOTE_RETENTION: ${REMOTE_RETENTION:-72}
+      RUN_ON_START: ${RUN_ON_START:-false}
+      CRON_SCHEDULE: ${CRON_SCHEDULE:-0 * * * *}
+    volumes:
+      - ./backups:/backups
+      - ./rclone-config:/root/.config/rclone
+    # Se o MariaDB roda em outro container na mesma máquina,
+    # conecte na rede dele (descomente e ajuste o nome):
+    # networks:
+    #   - mariadb-net
+    # Se o MariaDB roda no host (Windows/Linux), use:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    mem_limit: 512m
+    cpus: 0.5
+
+# networks:
+#   mariadb-net:
+#     external: true

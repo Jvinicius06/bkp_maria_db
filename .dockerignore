@@ -1,0 +1,8 @@
+.env
+.env.local
+backups/
+rclone-config/
+*.log
+.git/
+.gitignore
+README*

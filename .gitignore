@@ -1,0 +1,7 @@
+.env
+.env.local
+backups/
+rclone-config/
+*.log
+*.sql
+*.sql.gz

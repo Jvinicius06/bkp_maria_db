@@ -1,0 +1,3 @@
+# Carrega env vars exportadas pelo entrypoint e roda o backup
+# O schedule é substituído em runtime pelo entrypoint via $CRON_SCHEDULE
+__CRON_PLACEHOLDER__ . /app/env.sh && /app/scripts/backup.sh >> /backups/cron.log 2>&1
