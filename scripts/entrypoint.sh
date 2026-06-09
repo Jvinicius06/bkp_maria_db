@@ -40,13 +40,20 @@ tail -F /backups/cron.log /backups/backup.log &
 
 # Sobe a dashboard web (se houver senha definida) com auto-restart.
 if [[ -n "${DASHBOARD_PASSWORD:-}" ]]; then
-    echo "[entrypoint] iniciando dashboard na porta ${DASHBOARD_PORT:-8080}"
-    (
-        while true; do
-            python3 /app/scripts/dashboard.py || echo "[dashboard] saiu, reiniciando em 5s"
-            sleep 5
-        done
-    ) &
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "[entrypoint] ERRO: python3 não encontrado — rebuilde a imagem (docker compose build)."
+    else
+        echo "[entrypoint] iniciando dashboard na porta ${DASHBOARD_PORT:-8080}"
+        # PYTHONUNBUFFERED + -u: logs da dashboard saem em tempo real no docker logs.
+        export PYTHONUNBUFFERED=1
+        (
+            while true; do
+                python3 -u /app/scripts/dashboard.py 2>&1 \
+                    || echo "[dashboard] saiu (rc=$?), reiniciando em 5s"
+                sleep 5
+            done
+        ) &
+    fi
 else
     echo "[entrypoint] DASHBOARD_PASSWORD não definido — dashboard desabilitada."
 fi
