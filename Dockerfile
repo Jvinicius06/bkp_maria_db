@@ -8,6 +8,8 @@ RUN apk add --no-cache \
     pv \
     gzip \
     bash \
+    python3 \
+    curl \
     tzdata \
     coreutils \
     util-linux \

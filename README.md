@@ -36,10 +36,13 @@ O ajuste mais importante é **`THROTTLE_MBPS`**: quanto menor, menos stress no b
 ├── .env.example           # copie para .env e edite
 ├── crontab
 └── scripts/
-    ├── backup.sh          # dump + upload + rotação
-    ├── entrypoint.sh      # prepara env e roda o cron
+    ├── backup.sh          # dump + upload + rotação + alerta Discord
+    ├── entrypoint.sh      # prepara env, sobe dashboard e roda o cron
     ├── restore.sh         # restauração (arquivo local ou do Drive)
-    └── rclone-setup.sh    # atalho para configurar o Google Drive
+    ├── rclone-setup.sh    # atalho para configurar o Google Drive
+    ├── dashboard.py       # dashboard web + re-login OAuth do Drive
+    ├── notify.sh          # helper de notificação Discord (compartilhado)
+    └── watchdog.sh        # alerta se backup OK ficar atrasado
 ```
 
 ---
@@ -120,6 +123,21 @@ Passos interativos:
 
 A configuração fica em `./rclone-config/rclone.conf` (persistido via volume).
 
+> ### ⚠️ Por que a credencial "vence" (causa raiz)
+>
+> Se o seu app OAuth no Google Cloud está com o **OAuth consent screen** em
+> modo **"Testing / Em teste"**, o Google **expira o refresh token a cada 7 dias**.
+> É por isso que o backup para de subir sozinho.
+>
+> **Correção definitiva:** em
+> [console.cloud.google.com](https://console.cloud.google.com) → *APIs & Services*
+> → *OAuth consent screen* → mude o status para **"In production / Em produção"**
+> (*Publish app*). Para uso pessoal pode ignorar o aviso de "app não verificado".
+> A partir daí o refresh token não expira mais por tempo.
+>
+> Mesmo com isso resolvido, a **dashboard** abaixo permite reconectar em 1 clique
+> se algum dia o token for revogado, e o **Discord** te avisa na hora se falhar.
+
 ### 5. Testar com um backup imediato
 
 ```bash
@@ -145,6 +163,90 @@ Para parar o tail: `Ctrl+C` (o container continua rodando).
 ```bash
 docker compose up -d
 ```
+
+---
+
+## Dashboard web
+
+A dashboard sobe junto com o container na porta `DASHBOARD_PORT` (padrão `8080`)
+e mostra, num só lugar:
+
+- **Status do Google Drive** — teste de conexão ao vivo (detecta credencial vencida)
+- **Último backup bem-sucedido** e quanto tempo faz
+- **Lista de cópias** locais e no Drive (tamanho/data)
+- **Botão de backup manual**
+- **Re-login do Google Drive** (OAuth direto no navegador — veja abaixo)
+- **Configuração e teste do webhook do Discord**
+- **Logs** (`backup.log` / `cron.log`)
+
+### Acesso
+
+1. No `.env`, defina `DASHBOARD_PASSWORD` (obrigatório — sem senha a dashboard
+   **não sobe**), `DASHBOARD_USER` e `DASHBOARD_PUBLIC_URL`.
+2. Acesse `http://SEU_IP:8080` e faça login com usuário/senha definidos.
+
+> 🔒 **Segurança (VPS público):** é só autenticação básica sobre HTTP. Restrinja
+> a porta no firewall ao seu IP, ou coloque atrás de um reverse proxy com HTTPS
+> (Caddy/Nginx) e use `DASHBOARD_PUBLIC_URL=https://...`. Nunca exponha sem senha.
+
+---
+
+## Re-login do Google Drive (quando a credencial vencer)
+
+O re-login acontece **direto no navegador**: a própria dashboard é o endpoint de
+redirecionamento (`redirect_uri`) do OAuth. Por isso é preciso usar um **Client ID
+próprio do tipo "Web application"** (uma vez só).
+
+### Configuração única do Client OAuth
+
+1. [console.cloud.google.com](https://console.cloud.google.com) → *APIs & Services*
+   → *Credentials* → **Create credentials** → **OAuth client ID**
+2. Tipo: **Web application**
+3. Em **Authorized redirect URIs**, adicione **exatamente**:
+   ```
+   http://SEU_IP_PUBLICO:8080/oauth/callback
+   ```
+   (igual ao seu `DASHBOARD_PUBLIC_URL` + `/oauth/callback`)
+4. Copie o **Client ID** e **Client secret** para o `.env`:
+   ```
+   GOOGLE_CLIENT_ID=....apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=....
+   ```
+   > Se o seu `rclone.conf` já tem `client_id`/`client_secret`, a dashboard usa os
+   > de lá e você pode deixar essas duas vazias — mas o redirect URI acima precisa
+   > estar registrado nesse mesmo client.
+5. Garanta que o **OAuth consent screen** está **"In production"** (seção ⚠️ acima).
+
+### Reconectando
+
+1. Abra a dashboard → card **Google Drive** → **🔑 Reconectar Google Drive**
+2. Faça login na conta Google e autorize
+3. O Google redireciona de volta para a dashboard, que grava o novo token no
+   `rclone.conf` automaticamente. Status vira **CONECTADO**. Pronto.
+
+Nenhum túnel SSH, nenhuma porta `53682`, nenhum copiar-colar de token.
+
+---
+
+## Alertas no Discord
+
+Avisa no Discord quando um backup **falha** (conexão, dump, upload) — com destaque
+especial para **credencial do Drive vencida**.
+
+1. No Discord: canal → **Editar canal** → **Integrações** → **Webhooks** →
+   **Novo webhook** → **Copiar URL do webhook**.
+2. Cole em `DISCORD_WEBHOOK_URL` no `.env` **ou** na própria dashboard (card Discord).
+3. (Opcional) `DISCORD_NOTIFY_SUCCESS=true` para receber aviso também nos sucessos.
+
+### Watchdog (rede de segurança)
+
+A cada 30 min, o `watchdog.sh` checa o último backup **bem-sucedido**. Se passar de
+`BACKUP_MAX_AGE_HOURS` (padrão 3h) sem sucesso, manda um alerta no Discord —
+mesmo que o container esteja "de pé". É isso que pega o caso "credencial venceu há
+duas semanas e ninguém viu".
+
+Como agora `REMOTE_RETENTION=744` (~31 dias de hora em hora), você tem ~1 mês de
+margem para reconectar antes de perder backups antigos.
 
 ---
 
@@ -231,6 +333,23 @@ No `.env`:
 **Arquivo ficou muito grande para o Drive**
 - Aumente `GZIP_LEVEL` para `6` ou `9`
 - Considere backup só das tabelas essenciais (exclua tabelas de log/cache via `--ignore-table` — requer editar o `backup.sh`)
+
+**Re-login do Drive falha com "redirect_uri_mismatch"**
+- O `redirect_uri` registrado no Google Cloud precisa ser **idêntico** a
+  `DASHBOARD_PUBLIC_URL` + `/oauth/callback` (mesmo protocolo, IP/domínio e porta)
+
+**Re-login retorna "Google não retornou refresh_token"**
+- Revogue o acesso anterior em
+  [myaccount.google.com/permissions](https://myaccount.google.com/permissions)
+  e reconecte (a dashboard já pede `prompt=consent`)
+
+**Dashboard não abre**
+- `DASHBOARD_PASSWORD` precisa estar definido no `.env` (sem ele a dashboard não sobe)
+- Confira o mapeamento de porta e o firewall do VPS
+
+**Discord não notifica**
+- Teste pelo botão na dashboard (card Discord). Se o webhook está no `.env`,
+  ele tem prioridade sobre o salvo pela dashboard
 
 ---
 

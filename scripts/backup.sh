@@ -2,6 +2,10 @@
 # Backup MariaDB com baixo impacto + upload para Google Drive via rclone.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+. "${SCRIPT_DIR}/notify.sh"
+
 : "${DB_HOST:?DB_HOST obrigatório}"
 : "${DB_PORT:=3306}"
 : "${DB_USER:?DB_USER obrigatório}"
@@ -23,6 +27,18 @@ LOGFILE="${BACKUP_DIR}/backup.log"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOGFILE"; }
 
+# fail <exit_code> <titulo_discord> <mensagem>
+# Loga, notifica o Discord e encerra.
+fail() {
+    local code="$1" title="$2" msg="$3"
+    log "${msg}"
+    notify_discord error "${title}" \
+"${msg}
+
+Servidor DB: ${DB_HOST}:${DB_PORT} · Banco: ${DB_NAME}"
+    exit "${code}"
+}
+
 log "=== Iniciando backup de '${DB_NAME}' em ${DB_HOST}:${DB_PORT} ==="
 log "Destino local: ${OUTFILE}"
 log "Throttle: ${THROTTLE_MBPS} MB/s | gzip: -${GZIP_LEVEL}"
@@ -35,8 +51,8 @@ if ! mariadb \
         --user="$DB_USER" --password="$DB_PASSWORD" \
         --connect-timeout=10 \
         -e "SELECT 1" "$DB_NAME" >/dev/null 2>&1; then
-    log "ERRO: não foi possível conectar em ${DB_HOST}:${DB_PORT}"
-    exit 2
+    fail 2 "❌ Backup MariaDB: falha de conexão" \
+        "Não foi possível conectar ao banco em ${DB_HOST}:${DB_PORT}."
 fi
 
 # Throttle opcional via pv
@@ -80,16 +96,16 @@ if nice -n 19 ionice -c 3 \
     ELAPSED=$(( $(date +%s) - START ))
     log "Dump OK — tamanho: ${SIZE} — tempo: ${ELAPSED}s"
 else
-    log "ERRO no dump — removendo arquivo incompleto"
     rm -f "$OUTFILE"
-    exit 3
+    fail 3 "❌ Backup MariaDB: erro no dump" \
+        "O mariadb-dump falhou. Arquivo incompleto removido."
 fi
 
 # Sanity check: arquivo gzip válido?
 if ! gzip -t "$OUTFILE" 2>/dev/null; then
-    log "ERRO: arquivo gzip corrompido — removendo"
     rm -f "$OUTFILE"
-    exit 4
+    fail 4 "❌ Backup MariaDB: gzip corrompido" \
+        "O arquivo gerado não passou no teste de integridade gzip e foi removido."
 fi
 
 # Upload para o Drive
@@ -104,8 +120,20 @@ if rclone copy "$OUTFILE" "$RCLONE_REMOTE" \
         --stats=0; then
     log "Upload OK"
 else
-    log "ERRO no upload — backup local preservado em ${OUTFILE}"
-    exit 5
+    # Upload falhou. Testa a conexão para distinguir credencial vencida de
+    # problema transitório de rede.
+    HINT="${DASHBOARD_PUBLIC_URL:-configure DASHBOARD_PUBLIC_URL}"
+    if ! rclone lsd "${RCLONE_REMOTE%%:*}:" --retries 1 --low-level-retries 1 \
+            --timeout 20s >/dev/null 2>&1; then
+        fail 5 "🔑 Backup: CREDENCIAL DO GOOGLE DRIVE VENCIDA" \
+"Falha no upload e o rclone não consegue autenticar no Drive.
+Reconecte o Google Drive na dashboard: ${HINT}
+O backup local foi preservado em ${OUTFILE} e será enviado quando reconectar."
+    else
+        fail 5 "❌ Backup: falha no upload ao Google Drive" \
+"O upload falhou (possível problema de rede/cota), mas a autenticação parece OK.
+Backup local preservado em ${OUTFILE}."
+    fi
 fi
 
 # Rotação local: mantém só as últimas N
@@ -132,3 +160,13 @@ fi
 
 TOTAL_ELAPSED=$(( $(date +%s) - START ))
 log "=== Backup concluído em ${TOTAL_ELAPSED}s ==="
+
+# Marca o sucesso (usado pela dashboard e pelo watchdog).
+date +%s > "${BACKUP_DIR}/.last_success"
+
+# Notificação de sucesso (opcional — DISCORD_NOTIFY_SUCCESS=true).
+if [[ "${DISCORD_NOTIFY_SUCCESS:-false}" == "true" ]]; then
+    notify_discord ok "✅ Backup concluído: ${DB_NAME}" \
+"Arquivo: ${BASENAME} (${SIZE})
+Enviado para ${RCLONE_REMOTE} em ${TOTAL_ELAPSED}s."
+fi

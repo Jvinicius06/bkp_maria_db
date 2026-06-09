@@ -19,6 +19,20 @@ services:
       REMOTE_RETENTION: ${REMOTE_RETENTION:-72}
       RUN_ON_START: ${RUN_ON_START:-false}
       CRON_SCHEDULE: ${CRON_SCHEDULE:-0 * * * *}
+      # ----- Dashboard web -----
+      DASHBOARD_USER: ${DASHBOARD_USER:-admin}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+      DASHBOARD_PUBLIC_URL: ${DASHBOARD_PUBLIC_URL}
+      # ----- OAuth Google (Client ID próprio, tipo "Web application") -----
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      # ----- Discord + watchdog -----
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
+      DISCORD_NOTIFY_SUCCESS: ${DISCORD_NOTIFY_SUCCESS:-false}
+      BACKUP_MAX_AGE_HOURS: ${BACKUP_MAX_AGE_HOURS:-3}
+    ports:
+      # Dashboard web — proteja com firewall / reverse proxy + HTTPS
+      - "${DASHBOARD_PORT:-8080}:8080"
     volumes:
       - ./backups:/backups
       - ./rclone-config:/root/.config/rclone

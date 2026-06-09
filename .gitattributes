@@ -1,0 +1,6 @@
+# Scripts rodam dentro do container Linux — força fim de linha LF
+# para não quebrar com CRLF no Windows.
+*.sh   text eol=lf
+*.py   text eol=lf
+entrypoint.sh text eol=lf
+crontab text eol=lf

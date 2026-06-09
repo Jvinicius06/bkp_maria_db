@@ -5,3 +5,4 @@ rclone-config/
 *.log
 *.sql
 *.sql.gz
+__pycache__/

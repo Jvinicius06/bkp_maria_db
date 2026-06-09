@@ -1,3 +1,6 @@
 # Carrega env vars exportadas pelo entrypoint e roda o backup
 # O schedule é substituído em runtime pelo entrypoint via $CRON_SCHEDULE
 __CRON_PLACEHOLDER__ . /app/env.sh && /app/scripts/backup.sh >> /backups/cron.log 2>&1
+
+# Watchdog: a cada 30min, alerta no Discord se o último backup OK estiver atrasado
+30 * * * * . /app/env.sh && /app/scripts/watchdog.sh >> /backups/cron.log 2>&1
